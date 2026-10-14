@@ -64,6 +64,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsOff
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -76,6 +77,7 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
@@ -147,14 +149,20 @@ private const val STATE_CHANGED_ACTION = "com.example.taskmanager.STATE_CHANGED"
 enum class Priority { HIGH, MEDIUM, LOW }
 
 @Serializable
+enum class ReminderMode { ALARM, NOTIFICATION }
+
+@Immutable
+@Serializable
 data class Reminder(
     val id: String,
     val label: String,
     val timestamp: Long,
     val fired: Boolean = false,
     val createdAt: Long = System.currentTimeMillis(),
+    val mode: ReminderMode = ReminderMode.ALARM,
 )
 
+@Immutable
 @Serializable
 data class TaskItem(
     val id: String,
@@ -506,36 +514,60 @@ object ReminderScheduler {
 // ═══════════════════════════════════════════════════════════════════
 
 object Notifications {
-    const val CHANNEL_ID = "task_reminders"
+    const val CHANNEL_ALARM = "task_alarms"
+    const val CHANNEL_NOTIFICATION = "task_notifications"
 
-    fun ensureChannel(context: Context) {
+    fun ensureChannels(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        if (nm.getNotificationChannel(CHANNEL_ID) != null) return
 
-        val channel = NotificationChannel(
-            CHANNEL_ID,
-            "Task Reminders",
-            NotificationManager.IMPORTANCE_HIGH
-        ).apply {
-            description = "Alarms for your task reminders"
-            enableLights(true)
-            enableVibration(true)
-            vibrationPattern = longArrayOf(0, 220, 90, 220, 90, 420)
-            setShowBadge(true)
-            lockscreenVisibility = Notification.VISIBILITY_PUBLIC
-            setBypassDnd(true)
+        if (nm.getNotificationChannel(CHANNEL_ALARM) == null) {
+            val ch = NotificationChannel(
+                CHANNEL_ALARM,
+                "Task Alarms",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Full-screen alarms for task reminders"
+                enableLights(true)
+                enableVibration(true)
+                vibrationPattern = longArrayOf(0, 220, 90, 220, 90, 420)
+                setShowBadge(true)
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+                setBypassDnd(true)
 
-            val attrs = AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_ALARM)
-                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                .build()
+                val attrs = AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ALARM)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build()
 
-            val alarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-            setSound(alarmUri, attrs)
+                val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+                    ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+                setSound(uri, attrs)
+            }
+            nm.createNotificationChannel(ch)
         }
-        nm.createNotificationChannel(channel)
+
+        if (nm.getNotificationChannel(CHANNEL_NOTIFICATION) == null) {
+            val ch = NotificationChannel(
+                CHANNEL_NOTIFICATION,
+                "Task Notifications",
+                NotificationManager.IMPORTANCE_DEFAULT
+            ).apply {
+                description = "Regular notifications for task reminders"
+                enableVibration(true)
+                setShowBadge(true)
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+
+                val attrs = AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build()
+
+                val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+                setSound(uri, attrs)
+            }
+            nm.createNotificationChannel(ch)
+        }
     }
 
     fun showReminder(
@@ -544,6 +576,7 @@ object Notifications {
         taskTitle: String,
         label: String,
         reminderId: String,
+        mode: ReminderMode = ReminderMode.ALARM,
     ) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             val granted = ContextCompat.checkSelfPermission(
@@ -552,7 +585,7 @@ object Notifications {
             if (!granted) return
         }
 
-        ensureChannel(context)
+        ensureChannels(context)
 
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
@@ -578,18 +611,20 @@ object Notifications {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val markDonePi = PendingIntent.getBroadcast(
+        val dismissPi = PendingIntent.getBroadcast(
             context,
             reminderId.hashCode() + 1111,
             Intent(context, ReminderReceiver::class.java).apply {
-                action = ReminderReceiver.ACTION_MARK_DONE
-                putExtra(ReminderScheduler.EXTRA_TASK_ID, taskId)
+                action = ReminderReceiver.ACTION_DISMISS
                 putExtra(ReminderScheduler.EXTRA_REMINDER_ID, reminderId)
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val notif = NotificationCompat.Builder(context, CHANNEL_ID)
+        val isAlarm = mode == ReminderMode.ALARM
+        val channelId = if (isAlarm) CHANNEL_ALARM else CHANNEL_NOTIFICATION
+
+        val builder = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentTitle(label)
             .setContentText("Task \"$taskTitle\" is due now")
@@ -597,20 +632,28 @@ object Notifications {
                 NotificationCompat.BigTextStyle()
                     .bigText("Task \"$taskTitle\" is due now")
             )
-            .setPriority(NotificationCompat.PRIORITY_MAX)
-            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setPriority(
+                if (isAlarm) NotificationCompat.PRIORITY_MAX
+                else NotificationCompat.PRIORITY_DEFAULT
+            )
+            .setCategory(
+                if (isAlarm) NotificationCompat.CATEGORY_ALARM
+                else NotificationCompat.CATEGORY_REMINDER
+            )
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setContentIntent(contentPi)
-            .setFullScreenIntent(fullScreenPi, true)
             .setAutoCancel(true)
             .setWhen(System.currentTimeMillis())
             .setShowWhen(true)
             .setOnlyAlertOnce(false)
-            .addAction(0, "Mark as done", markDonePi)
-            .build()
+            .addAction(0, "Dismiss", dismissPi)
+
+        if (isAlarm) {
+            builder.setFullScreenIntent(fullScreenPi, true)
+        }
 
         try {
-            nm.notify(reminderId.hashCode(), notif)
+            nm.notify(reminderId.hashCode(), builder.build())
         } catch (_: SecurityException) {}
     }
 }
@@ -622,13 +665,13 @@ object Notifications {
 class ReminderReceiver : BroadcastReceiver() {
 
     companion object {
-        const val ACTION_MARK_DONE = "com.example.taskmanager.ACTION_MARK_DONE"
+        const val ACTION_DISMISS = "com.example.taskmanager.ACTION_DISMISS"
     }
 
     override fun onReceive(context: Context, intent: Intent) {
         when (intent.action) {
             ReminderScheduler.ACTION_REMINDER -> handleReminder(context, intent)
-            ACTION_MARK_DONE -> handleMarkDone(context, intent)
+            ACTION_DISMISS -> handleDismiss(context, intent)
         }
     }
 
@@ -639,38 +682,29 @@ class ReminderReceiver : BroadcastReceiver() {
         val label = intent.getStringExtra(ReminderScheduler.EXTRA_REMINDER_LABEL) ?: "Reminder"
 
         val state = TaskStorage.load(context)
+        var mode = ReminderMode.ALARM
         val updated = state.tasks.map { t ->
             if (t.id != taskId) t
             else t.copy(reminders = t.reminders.map { r ->
-                if (r.id == reminderId) r.copy(fired = true) else r
+                if (r.id == reminderId) {
+                    mode = r.mode
+                    r.copy(fired = true)
+                } else r
             })
         }
         TaskStorage.save(context, AppState(updated))
 
-        Notifications.showReminder(context, taskId, taskTitle, label, reminderId)
+        Notifications.showReminder(context, taskId, taskTitle, label, reminderId, mode)
 
         context.sendBroadcast(
             Intent(STATE_CHANGED_ACTION).setPackage(context.packageName)
         )
     }
 
-    private fun handleMarkDone(context: Context, intent: Intent) {
-        val taskId = intent.getStringExtra(ReminderScheduler.EXTRA_TASK_ID) ?: return
-
+    private fun handleDismiss(context: Context, intent: Intent) {
+        val reminderId = intent.getStringExtra(ReminderScheduler.EXTRA_REMINDER_ID) ?: return
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        intent.getStringExtra(ReminderScheduler.EXTRA_REMINDER_ID)?.let {
-            nm.cancel(it.hashCode())
-        }
-
-        val state = TaskStorage.load(context)
-        val updated = state.tasks.map { t ->
-            if (t.id == taskId) t.copy(done = true) else t
-        }
-        TaskStorage.save(context, AppState(updated))
-
-        context.sendBroadcast(
-            Intent(STATE_CHANGED_ACTION).setPackage(context.packageName)
-        )
+        nm.cancel(reminderId.hashCode())
     }
 }
 
@@ -698,7 +732,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        Notifications.ensureChannel(this)
+        Notifications.ensureChannels(this)
 
         setContent {
             TaskManagerTheme {
@@ -834,12 +868,13 @@ class TaskViewModel(app: Application) : AndroidViewModel(app) {
         persist()
     }
 
-    fun addReminder(taskId: String, label: String, timestamp: Long) {
+    fun addReminder(taskId: String, label: String, timestamp: Long, mode: ReminderMode) {
         val ctx = getApplication<Application>()
         val newReminder = Reminder(
             id = UUID.randomUUID().toString(),
             label = label.ifBlank { "Reminder" },
             timestamp = timestamp,
+            mode = mode,
         )
         var added: Pair<TaskItem, Reminder>? = null
         _tasks.update { list ->
@@ -890,6 +925,14 @@ object AppColors {
     val Low = Color(0xFF3DDC97)
 }
 
+private val AccentGradientBrush: Brush = Brush.linearGradient(
+    listOf(Color(0xFF7C5CFF), Color(0xFF4DABFF))
+)
+
+private val TransparentBrush: Brush = Brush.linearGradient(
+    listOf(Color.Transparent, Color.Transparent)
+)
+
 @Composable
 fun TaskManagerTheme(content: @Composable () -> Unit) {
     MaterialTheme(
@@ -937,6 +980,12 @@ fun TaskApp(vm: TaskViewModel) {
     val toasts = remember { mutableStateListOf<ToastDataWrapper>() }
     val scope = rememberCoroutineScope()
 
+    val onToggle: (String) -> Unit = remember { { id: String -> vm.toggleDone(id) } }
+    val onMenu: (String) -> Unit = remember { { id: String -> sheet = SheetTarget.Actions(id) } }
+    val onAddReminder: (String) -> Unit = remember { { id: String -> sheet = SheetTarget.ReminderEditor(id) } }
+    val onDeleteReminder: (String, String) -> Unit =
+        remember { { tid: String, rid: String -> vm.deleteReminder(tid, rid) } }
+
     LaunchedEffect(Unit) {
         vm.toasts.collect { data ->
             val id = UUID.randomUUID().toString()
@@ -971,10 +1020,10 @@ fun TaskApp(vm: TaskViewModel) {
                         TaskCard(
                             task = task,
                             now = tick,
-                            onToggle = { vm.toggleDone(task.id) },
-                            onMenu = { sheet = SheetTarget.Actions(task.id) },
-                            onAddReminder = { sheet = SheetTarget.ReminderEditor(task.id) },
-                            onDeleteReminder = { rid -> vm.deleteReminder(task.id, rid) },
+                            onToggle = onToggle,
+                            onMenu = onMenu,
+                            onAddReminder = onAddReminder,
+                            onDeleteReminder = onDeleteReminder,
                         )
                     }
                 }
@@ -983,14 +1032,13 @@ fun TaskApp(vm: TaskViewModel) {
 
         Box(
             modifier = Modifier
-                .align(Alignment.BottomStart)
+                .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
-                .padding(start = 20.dp, bottom = 22.dp)
-                .size(58.dp)
-                .clip(RoundedCornerShape(20.dp))
-                .background(
-                    Brush.linearGradient(listOf(AppColors.Accent, AppColors.Accent2))
-                )
+                .padding(bottom = 22.dp)
+                .width(140.dp)
+                .height(52.dp)
+                .clip(RoundedCornerShape(26.dp))
+                .background(AccentGradientBrush)
                 .clickable { sheet = SheetTarget.TaskEditor(null) },
             contentAlignment = Alignment.Center
         ) {
@@ -1039,11 +1087,11 @@ fun TaskApp(vm: TaskViewModel) {
                 ReminderEditorSheet(
                     task = task,
                     onDismiss = { sheet = SheetTarget.None },
-                    onSave = { label, timestamp ->
+                    onSave = { label, timestamp, mode ->
                         if (timestamp <= System.currentTimeMillis() - 60_000L) {
                             vm.emitToast("Invalid time", "Reminder time is in the past.")
                         } else {
-                            vm.addReminder(task.id, label, timestamp)
+                            vm.addReminder(task.id, label, timestamp, mode)
                         }
                         sheet = SheetTarget.None
                     },
@@ -1241,10 +1289,10 @@ private fun EmptyState() {
 private fun TaskCard(
     task: TaskItem,
     now: Long,
-    onToggle: () -> Unit,
-    onMenu: () -> Unit,
-    onAddReminder: () -> Unit,
-    onDeleteReminder: (String) -> Unit,
+    onToggle: (String) -> Unit,
+    onMenu: (String) -> Unit,
+    onAddReminder: (String) -> Unit,
+    onDeleteReminder: (String, String) -> Unit,
 ) {
     val pc = priorityColor(task.priority)
 
@@ -1273,19 +1321,13 @@ private fun TaskCard(
                         modifier = Modifier
                             .size(24.dp)
                             .clip(CircleShape)
-                            .background(
-                                if (task.done) Brush.linearGradient(
-                                    listOf(AppColors.Accent, AppColors.Accent2)
-                                ) else Brush.linearGradient(
-                                    listOf(Color.Transparent, Color.Transparent)
-                                )
-                            )
+                            .background(if (task.done) AccentGradientBrush else TransparentBrush)
                             .border(
                                 2.dp,
                                 if (task.done) Color.Transparent else Color.White.copy(alpha = 0.22f),
                                 CircleShape
                             )
-                            .clickable { onToggle() },
+                            .clickable { onToggle(task.id) },
                         contentAlignment = Alignment.Center
                     ) {
                         if (task.done) {
@@ -1351,7 +1393,7 @@ private fun TaskCard(
                         modifier = Modifier
                             .size(30.dp)
                             .clip(RoundedCornerShape(10.dp))
-                            .clickable { onMenu() },
+                            .clickable { onMenu(task.id) },
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
@@ -1370,7 +1412,7 @@ private fun TaskCard(
                             ReminderRow(
                                 reminder = r,
                                 now = now,
-                                onDelete = { onDeleteReminder(r.id) },
+                                onDelete = { onDeleteReminder(task.id, r.id) },
                             )
                         }
                     }
@@ -1386,7 +1428,7 @@ private fun TaskCard(
                             Color.White.copy(alpha = 0.14f),
                             RoundedCornerShape(14.dp)
                         )
-                        .clickable { onAddReminder() }
+                        .clickable { onAddReminder(task.id) }
                         .padding(vertical = 10.dp),
                     contentAlignment = Alignment.Center
                 ) {
@@ -1764,9 +1806,11 @@ private fun ActionRow(
 private fun ReminderEditorSheet(
     task: TaskItem,
     onDismiss: () -> Unit,
-    onSave: (label: String, timestamp: Long) -> Unit,
+    onSave: (label: String, timestamp: Long, mode: ReminderMode) -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    var mode by remember { mutableStateOf(ReminderMode.ALARM) }
 
     val initialMillis = remember {
         val c = Calendar.getInstance()
@@ -1810,15 +1854,23 @@ private fun ReminderEditorSheet(
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp)
                 .imePadding()
+                .navigationBarsPadding()
                 .verticalScroll(rememberScrollState())
-                .padding(bottom = 22.dp)
+                .padding(bottom = 24.dp)
         ) {
-            Text(
-                "New Reminder",
-                color = AppColors.Text,
-                fontSize = 17.sp,
-                fontWeight = FontWeight.ExtraBold,
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    "New Reminder",
+                    color = AppColors.Text,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                )
+                Spacer(Modifier.weight(1f))
+                ReminderModeToggle(mode) { mode = it }
+            }
             Spacer(Modifier.height(4.dp))
             Text(
                 task.title,
@@ -1867,9 +1919,10 @@ private fun ReminderEditorSheet(
                     text = "Save Reminder",
                     primary = true,
                     modifier = Modifier.weight(1f),
-                    onClick = { onSave("", selectedTs) },
+                    onClick = { onSave("", selectedTs, mode) },
                 )
             }
+            Spacer(Modifier.height(16.dp))
         }
     }
 }
@@ -2352,6 +2405,57 @@ private fun RowScope.PriorityItem(
 }
 
 @Composable
+private fun ReminderModeToggle(
+    mode: ReminderMode,
+    onChange: (ReminderMode) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(11.dp))
+            .background(Color.White.copy(alpha = 0.05f))
+            .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(11.dp))
+            .padding(2.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        ToggleIconButton(
+            icon = Icons.Filled.Schedule,
+            active = mode == ReminderMode.ALARM,
+            onClick = { onChange(ReminderMode.ALARM) },
+        )
+        ToggleIconButton(
+            icon = Icons.Filled.Notifications,
+            active = mode == ReminderMode.NOTIFICATION,
+            onClick = { onChange(ReminderMode.NOTIFICATION) },
+        )
+    }
+}
+
+@Composable
+private fun ToggleIconButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    active: Boolean,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .size(34.dp)
+            .clip(RoundedCornerShape(9.dp))
+            .background(
+                if (active) AppColors.Accent.copy(alpha = 0.28f) else Color.Transparent
+            )
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = if (active) Color(0xFFC4B5FD) else AppColors.Muted,
+            modifier = Modifier.size(16.dp),
+        )
+    }
+}
+
+@Composable
 private fun SheetButton(
     text: String,
     primary: Boolean,
@@ -2364,11 +2468,7 @@ private fun SheetButton(
             .clip(RoundedCornerShape(16.dp))
             .then(
                 if (primary)
-                    Modifier.background(
-                        Brush.linearGradient(
-                            listOf(AppColors.Accent, AppColors.Accent2)
-                        )
-                    )
+                    Modifier.background(AccentGradientBrush)
                 else Modifier.background(Color.White.copy(alpha = 0.06f))
             )
             .clickable { onClick() },
@@ -2417,11 +2517,7 @@ private fun ToastView(
             modifier = Modifier
                 .size(32.dp)
                 .clip(RoundedCornerShape(11.dp))
-                .background(
-                    Brush.linearGradient(
-                        listOf(AppColors.Accent, AppColors.Accent2)
-                    )
-                ),
+                .background(AccentGradientBrush),
             contentAlignment = Alignment.Center,
         ) {
             Icon(
@@ -2526,7 +2622,7 @@ private fun PreviewTaskCards() {
                         onToggle = {},
                         onMenu = {},
                         onAddReminder = {},
-                        onDeleteReminder = { _ -> },
+                        onDeleteReminder = { _, _ -> },
                     )
                 }
             }

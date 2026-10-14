@@ -28,3 +28,4 @@ captures/
 *.sh
 *.txt
 
+*.bak.*
