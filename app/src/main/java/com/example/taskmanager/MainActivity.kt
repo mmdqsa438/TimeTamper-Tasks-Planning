@@ -48,9 +48,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
@@ -90,7 +92,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -947,7 +948,7 @@ fun TaskApp(vm: TaskViewModel) {
         }
     }
 
-    val sorted = remember(tasks, tick) { tasks.sortedWith(taskComparator) }
+    val sorted = remember(tasks) { tasks.sortedWith(taskComparator) }
 
     Box(modifier = Modifier.fillMaxSize()) {
         Column(
@@ -986,7 +987,6 @@ fun TaskApp(vm: TaskViewModel) {
                 .navigationBarsPadding()
                 .padding(start = 20.dp, bottom = 22.dp)
                 .size(58.dp)
-                .shadow(20.dp, RoundedCornerShape(20.dp), clip = false)
                 .clip(RoundedCornerShape(20.dp))
                 .background(
                     Brush.linearGradient(listOf(AppColors.Accent, AppColors.Accent2))
@@ -1252,14 +1252,7 @@ private fun TaskCard(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(20.dp))
-            .background(
-                Brush.verticalGradient(
-                    listOf(
-                        Color.White.copy(alpha = 0.05f),
-                        Color.White.copy(alpha = 0.02f),
-                    )
-                )
-            )
+            .background(Color.White.copy(alpha = 0.04f))
             .border(1.dp, AppColors.Line, RoundedCornerShape(20.dp))
             .alpha(if (task.done) 0.5f else 1f)
             .padding(14.dp)
@@ -1784,7 +1777,6 @@ private fun ReminderEditorSheet(
         c.timeInMillis
     }
 
-    var label by remember { mutableStateOf("") }
     val initialJ = remember { JalaliCalendar.fromMillis(initialMillis) }
     var jy by remember { mutableIntStateOf(initialJ.jy) }
     var jm by remember { mutableIntStateOf(initialJ.jm) }
@@ -1802,21 +1794,8 @@ private fun ReminderEditorSheet(
         )
     }
 
-    fun updateFromMillis(millis: Long) {
-        val j = JalaliCalendar.fromMillis(millis)
-        jy = j.jy; jm = j.jm; jd = j.jd
-        val cal = Calendar.getInstance().apply { timeInMillis = millis }
-        hh = cal.get(Calendar.HOUR_OF_DAY)
-        mm = cal.get(Calendar.MINUTE)
-    }
-
     val selectedTs = remember(jy, jm, jd, hh, mm) {
         JalaliCalendar.toMillis(jy, jm, jd, hh, mm)
-    }
-
-    val preview = remember(selectedTs) {
-        val w = Fmt.reminderWhen(selectedTs)
-        "${w.main}  ·  ${w.sub}"
     }
 
     ModalBottomSheet(
@@ -1830,8 +1809,9 @@ private fun ReminderEditorSheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp)
-                .padding(bottom = 22.dp)
                 .imePadding()
+                .verticalScroll(rememberScrollState())
+                .padding(bottom = 22.dp)
         ) {
             Text(
                 "New Reminder",
@@ -1849,29 +1829,6 @@ private fun ReminderEditorSheet(
                 modifier = Modifier.padding(bottom = 18.dp)
             )
 
-            FieldLabel("Label (optional)")
-            StyledTextField(
-                value = label,
-                onValueChange = { label = it.take(40) },
-                placeholder = "e.g. Follow-up call",
-                singleLine = true,
-            )
-
-            Spacer(Modifier.height(16.dp))
-            FieldLabel("Quick Select")
-            QuickChips(
-                onPick = { offsetDays ->
-                    val c = Calendar.getInstance()
-                    c.add(Calendar.DAY_OF_MONTH, offsetDays)
-                    c.set(Calendar.HOUR_OF_DAY, hh)
-                    c.set(Calendar.MINUTE, mm)
-                    c.set(Calendar.SECOND, 0)
-                    c.set(Calendar.MILLISECOND, 0)
-                    updateFromMillis(c.timeInMillis)
-                }
-            )
-
-            Spacer(Modifier.height(4.dp))
             JalaliCalendarGrid(
                 jy = jy, jm = jm, jd = jd,
                 onSelect = { d -> jd = d },
@@ -1890,7 +1847,6 @@ private fun ReminderEditorSheet(
             )
 
             Spacer(Modifier.height(14.dp))
-            FieldLabel("Reminder time")
 
             TimeWheelPicker(
                 hour = hh,
@@ -1899,52 +1855,7 @@ private fun ReminderEditorSheet(
                 onMinuteChange = { mm = it },
             )
 
-            Spacer(Modifier.height(14.dp))
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(15.dp))
-                    .background(
-                        Brush.linearGradient(
-                            listOf(
-                                AppColors.Accent.copy(alpha = 0.15f),
-                                AppColors.Accent2.copy(alpha = 0.08f),
-                            )
-                        )
-                    )
-                    .border(
-                        1.dp,
-                        AppColors.Accent.copy(alpha = 0.22f),
-                        RoundedCornerShape(15.dp)
-                    )
-                    .padding(horizontal = 14.dp, vertical = 13.dp)
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        Icons.Filled.Notifications,
-                        contentDescription = null,
-                        tint = Color(0xFFB7A6FF),
-                        modifier = Modifier.size(17.dp)
-                    )
-                    Spacer(Modifier.width(10.dp))
-                    Text(
-                        "Selected:  ",
-                        color = Color(0xFFD8D0FF),
-                        fontSize = 13.5.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Text(
-                        preview,
-                        color = Color.White,
-                        fontSize = 13.5.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(18.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 SheetButton(
                     text = "Cancel",
@@ -1956,7 +1867,7 @@ private fun ReminderEditorSheet(
                     text = "Save Reminder",
                     primary = true,
                     modifier = Modifier.weight(1f),
-                    onClick = { onSave(label.trim(), selectedTs) },
+                    onClick = { onSave("", selectedTs) },
                 )
             }
         }
@@ -2147,7 +2058,7 @@ private fun TimeWheelPicker(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(190.dp)
+            .height(160.dp)
             .clip(RoundedCornerShape(20.dp))
             .background(Color.White.copy(alpha = 0.04f))
             .border(1.dp, Color.White.copy(alpha = 0.07f), RoundedCornerShape(20.dp))
@@ -2210,7 +2121,7 @@ private fun WheelColumn(
     modifier: Modifier = Modifier,
 ) {
     val itemHeight = 46.dp
-    val visibleCount = 5
+    val visibleCount = 3
     val safeValue = value.coerceIn(0, count - 1)
     val listState = rememberLazyListState(
         initialFirstVisibleItemIndex = safeValue
@@ -2265,10 +2176,8 @@ private fun WheelColumn(
             val alpha = when (distance) {
                 0 -> 1f
                 1 -> 0.55f
-                2 -> 0.28f
-                else -> 0.12f
+                else -> 0.28f
             }
-            val scale = if (distance == 0) 1.08f else 1f
 
             Box(
                 modifier = Modifier
@@ -2285,14 +2194,9 @@ private fun WheelColumn(
                 Text(
                     text = index.toString().padStart(2, '0'),
                     color = Color.White.copy(alpha = alpha),
-                    fontSize = 26.sp,
+                    fontSize = if (distance == 0) 28.sp else 24.sp,
                     fontWeight = FontWeight.ExtraBold,
                     style = TextStyle(fontFeatureSettings = "tnum"),
-                    modifier = Modifier
-                        .graphicsLayer {
-                            scaleX = scale
-                            scaleY = scale
-                        }
                 )
             }
         }
@@ -2448,63 +2352,6 @@ private fun RowScope.PriorityItem(
 }
 
 @Composable
-private fun QuickChips(onPick: (Int) -> Unit) {
-    var selected by remember { mutableStateOf<String?>(null) }
-
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        ChipItem("Today", selected == "today") {
-            selected = "today"
-            onPick(0)
-        }
-        ChipItem("Tomorrow", selected == "tomorrow") {
-            selected = "tomorrow"
-            onPick(1)
-        }
-        ChipItem("Day After", selected == "dayafter") {
-            selected = "dayafter"
-            onPick(2)
-        }
-        ChipItem("Next Week", selected == "week") {
-            selected = "week"
-            onPick(7)
-        }
-    }
-}
-
-@Composable
-private fun RowScope.ChipItem(
-    label: String,
-    active: Boolean,
-    onClick: () -> Unit,
-) {
-    val bg = if (active) AppColors.Accent.copy(alpha = 0.22f) else Color.White.copy(alpha = 0.05f)
-    val border = if (active) AppColors.Accent.copy(alpha = 0.5f) else Color.White.copy(alpha = 0.07f)
-    val fg = if (active) Color(0xFFC4B5FD) else Color(0xFFC3C3D0)
-
-    Box(
-        modifier = Modifier
-            .weight(1f)
-            .clip(RoundedCornerShape(12.dp))
-            .background(bg)
-            .border(1.dp, border, RoundedCornerShape(12.dp))
-            .clickable { onClick() }
-            .padding(vertical = 9.dp, horizontal = 4.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            label,
-            color = fg,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-        )
-    }
-}
-
-@Composable
 private fun SheetButton(
     text: String,
     primary: Boolean,
@@ -2601,22 +2448,6 @@ private fun ToastView(
             )
         }
     }
-}
-
-// ═══════════════════════════════════════════════════════════════════
-//  Utilities for composition
-// ═══════════════════════════════════════════════════════════════════
-
-@Composable
-private fun useNowTicker(intervalMs: Long = 30_000L): Long {
-    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            now = System.currentTimeMillis()
-            delay(intervalMs)
-        }
-    }
-    return now
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -2813,7 +2644,6 @@ private fun PreviewSheetButtons() {
                     )
                 }
                 PrioritySegment(Priority.MEDIUM) { _ -> }
-                QuickChips { _ -> }
             }
         }
     }
