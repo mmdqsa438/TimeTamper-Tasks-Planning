@@ -14,15 +14,15 @@ The app exists because most task managers either ignore the Persian calendar or 
 
 ## Screenshots
 
-![img 1](media/1.jpg)
-
-![img 2](media/2.jpg)
-
-![img 3](media/3.jpg)
-
-![img 4](media/4.jpg)
-
-![img 5](media/5.jpg)
+<table>
+  <tr>
+    <td><img src="media/1.jpg" width="180" alt="Empty state"></td>
+    <td><img src="media/2.jpg" width="180" alt="Task list"></td>
+    <td><img src="media/3.jpg" width="180" alt="Reminder sheet"></td>
+    <td><img src="media/4.jpg" width="180" alt="Jalali calendar"></td>
+    <td><img src="media/5.jpg" width="180" alt="Time picker"></td>
+  </tr>
+</table>
 
 ## How it works
 
