@@ -100,7 +100,9 @@ app/
 │       ├── drawable/
 │       └── mipmap-anydpi-v26/
 ├── build.gradle.kts
-└── proguard-rules.pro
+├── proguard-rules.pro
+└── TaskManager-github-Actions.zip
+
 ```
 
 All application code lives in `MainActivity.kt`. This was a deliberate choice: the project is small enough that a single file is easier to navigate than a package tree, and it makes the whole app readable in one scroll. If the app grows past a few thousand lines, splitting it becomes worthwhile.
