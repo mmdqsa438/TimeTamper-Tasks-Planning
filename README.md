@@ -7,8 +7,8 @@ The app exists because most task managers either ignore the Persian calendar or 
 ## What it does
 
 - Create tasks with a title, optional description, and a three-level priority (High, Medium, Low).
-- Attach one or more reminders to any task. Each reminder is independent.
-- Choose how each reminder fires: as a full-screen alarm with sound and vibration, or as a quiet notification.
+- Attach one or **MORE reminders to any task**. Each reminder is independent.
+- Choose how each reminder fires: as an **Alarm** with sound and vibration, or as a quiet **Notification**.
 - See reminders on a Jalali calendar with the correct number of days per month.
 - Track completion separately from reminder state. Dismissing an alarm does not mark the task done.
 
