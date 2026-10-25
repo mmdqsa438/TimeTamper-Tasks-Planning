@@ -111,10 +111,6 @@ All application code lives in `MainActivity.kt`. This was a deliberate choice: t
 - Notification permission on Android 13+ is requested on first launch. If denied, reminders still fire but stay silent.
 - Reminders already fired before the app opens are marked as dismissed and are not shown again.
 
-## License
-
-MIT. See [LICENSE](LICENSE).
-
 ## Credits
 
 Jalali calendar conversion based on [jalaali-js](https://github.com/jalaali/jalaali-js). Icons from Material Symbols.
